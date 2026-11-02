@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #f8fafc;
+  color: #0f172a;
+  font-family: var(--font-jakarta), var(--font-cairo), system-ui, sans-serif;
+}
+
+[dir='rtl'] {
+  font-family: var(--font-cairo), var(--font-jakarta), system-ui, sans-serif;
+}
