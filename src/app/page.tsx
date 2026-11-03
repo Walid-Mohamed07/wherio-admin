@@ -58,6 +58,39 @@ export default function WherioAdminDashboard() {
   const [users, setUsers] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
   const [actionBanner, setActionBanner] = useState<string | null>(null);
+  const [adminKeyInput, setAdminKeyInput] = useState<string>(
+    process.env.NEXT_PUBLIC_ADMIN_API_KEY ||
+      process.env.ADMIN_API_KEY ||
+      "dev-wherio-admin-key-2026",
+  );
+  const [adminAuthError, setAdminAuthError] = useState<string | null>(null);
+
+  const getActiveAdminKey = (overrideKey?: string): string => {
+    if (overrideKey !== undefined) return overrideKey.trim();
+    if (typeof window !== "undefined") {
+      const saved = window.localStorage.getItem("wherio_admin_key");
+      if (saved && saved.trim()) return saved.trim();
+    }
+    return (
+      process.env.NEXT_PUBLIC_ADMIN_API_KEY ||
+      process.env.ADMIN_API_KEY ||
+      adminKeyInput ||
+      "dev-wherio-admin-key-2026"
+    ).trim();
+  };
+
+  const adminFetch = async (
+    url: string,
+    options: RequestInit = {},
+    overrideKey?: string,
+  ) => {
+    const key = getActiveAdminKey(overrideKey);
+    const headers: Record<string, string> = {
+      ...(options.headers as Record<string, string>),
+      ...(key ? { "x-admin-key": key } : {}),
+    };
+    return fetch(url, { ...options, headers });
+  };
 
   // Manual Place Creation Form State
   const [newPlace, setNewPlace] = useState({
@@ -85,16 +118,35 @@ export default function WherioAdminDashboard() {
     wifi: "AVAILABLE" as "AVAILABLE" | "NOT_AVAILABLE" | "UNKNOWN",
   });
 
-  const loadAdminData = async () => {
+  const loadAdminData = async (overrideKey?: string) => {
     setLoading(true);
+    setAdminAuthError(null);
     try {
-      const [ovRes, plRes, rvRes, usRes, auRes] = await Promise.all([
-        fetch(`${API_BASE}/admin/overview`).then((r) => r.json()),
-        fetch(`${API_BASE}/admin/places`).then((r) => r.json()),
-        fetch(`${API_BASE}/admin/reviews`).then((r) => r.json()),
-        fetch(`${API_BASE}/admin/users`).then((r) => r.json()),
-        fetch(`${API_BASE}/admin/audit-logs`).then((r) => r.json()),
+      const [ovHttp, plHttp, rvHttp, usHttp, auHttp] = await Promise.all([
+        adminFetch(`${API_BASE}/admin/overview`, {}, overrideKey),
+        adminFetch(`${API_BASE}/admin/places`, {}, overrideKey),
+        adminFetch(`${API_BASE}/admin/reviews`, {}, overrideKey),
+        adminFetch(`${API_BASE}/admin/users`, {}, overrideKey),
+        adminFetch(`${API_BASE}/admin/audit-logs`, {}, overrideKey),
       ]);
+
+      const ovRes = await ovHttp.json();
+      if (!ovHttp.ok || !ovRes?.kpis) {
+        setOverview(null);
+        setAdminAuthError(
+          ovRes?.messageEn ||
+            "Admin access key (ADMIN_API_KEY) is required by the backend server.",
+        );
+        return;
+      }
+
+      const [plRes, rvRes, usRes, auRes] = await Promise.all([
+        plHttp.json(),
+        rvHttp.json(),
+        usHttp.json(),
+        auHttp.json(),
+      ]);
+
       setOverview(ovRes);
       setPlaces(Array.isArray(plRes) ? plRes : []);
       setReviews(Array.isArray(rvRes) ? rvRes : []);
@@ -108,13 +160,17 @@ export default function WherioAdminDashboard() {
   };
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const saved = window.localStorage.getItem("wherio_admin_key");
+      if (saved) setAdminKeyInput(saved);
+    }
     loadAdminData();
   }, []);
 
   const handleGenerate100LaunchPlaces = async () => {
     setLoading(true);
     try {
-      const res = await fetch(
+      const res = await adminFetch(
         `${API_BASE}/admin/places/generate-launch-batch`,
         {
           method: "POST",
@@ -135,7 +191,7 @@ export default function WherioAdminDashboard() {
   const handleClearDemoData = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/admin/places/clear-demo-data`, {
+      const res = await adminFetch(`${API_BASE}/admin/places/clear-demo-data`, {
         method: "POST",
       }).then((r) => r.json());
       setActionBanner(
@@ -153,7 +209,7 @@ export default function WherioAdminDashboard() {
   const handleCreateManualPlace = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPlace.nameEn.trim()) return;
-    const res = await fetch(`${API_BASE}/admin/places`, {
+    const res = await adminFetch(`${API_BASE}/admin/places`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -185,7 +241,7 @@ export default function WherioAdminDashboard() {
       | "NEEDS_REVIEW",
     operatingStatus?: "ACTIVE" | "TEMPORARILY_CLOSED" | "PERMANENTLY_CLOSED",
   ) => {
-    await fetch(`${API_BASE}/admin/places/${placeId}/workflow`, {
+    await adminFetch(`${API_BASE}/admin/places/${placeId}/workflow`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workflowStatus, operatingStatus }),
@@ -199,12 +255,14 @@ export default function WherioAdminDashboard() {
   };
 
   const handleDeletePlace = async (placeId: string) => {
-    await fetch(`${API_BASE}/admin/places/${placeId}`, { method: "DELETE" });
+    await adminFetch(`${API_BASE}/admin/places/${placeId}`, {
+      method: "DELETE",
+    });
     await loadAdminData();
   };
 
   const handleToggleCityActive = async (cityId: string) => {
-    await fetch(`${API_BASE}/admin/cities/${cityId}/toggle`, {
+    await adminFetch(`${API_BASE}/admin/cities/${cityId}/toggle`, {
       method: "PATCH",
     });
     await loadAdminData();
@@ -214,7 +272,7 @@ export default function WherioAdminDashboard() {
     reviewId: string,
     status: "APPROVED" | "HIDDEN",
   ) => {
-    await fetch(`${API_BASE}/admin/reviews/${reviewId}/moderate`, {
+    await adminFetch(`${API_BASE}/admin/reviews/${reviewId}/moderate`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
@@ -223,7 +281,9 @@ export default function WherioAdminDashboard() {
   };
 
   const handleDeleteReview = async (reviewId: string) => {
-    await fetch(`${API_BASE}/admin/reviews/${reviewId}`, { method: "DELETE" });
+    await adminFetch(`${API_BASE}/admin/reviews/${reviewId}`, {
+      method: "DELETE",
+    });
     await loadAdminData();
   };
 
@@ -231,7 +291,7 @@ export default function WherioAdminDashboard() {
     userId: string,
     currentlySuspended: boolean,
   ) => {
-    await fetch(`${API_BASE}/admin/users/${userId}/suspend`, {
+    await adminFetch(`${API_BASE}/admin/users/${userId}/suspend`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -254,7 +314,7 @@ export default function WherioAdminDashboard() {
   };
 
   const handleTriggerDatabaseBackup = async () => {
-    const res = await fetch(`${API_BASE}/admin/backup`, {
+    const res = await adminFetch(`${API_BASE}/admin/backup`, {
       method: "POST",
     }).then((r) => r.json());
     setActionBanner(
@@ -267,8 +327,8 @@ export default function WherioAdminDashboard() {
 
   const handleExportOperationsReport = async () => {
     try {
-      const res = await fetch(`${API_BASE}/admin/reports/export`).then((r) =>
-        r.json(),
+      const res = await adminFetch(`${API_BASE}/admin/reports/export`).then(
+        (r) => r.json(),
       );
       if (typeof window !== "undefined" && res?.csvContent) {
         const blob = new Blob([res.csvContent], {
@@ -299,47 +359,50 @@ export default function WherioAdminDashboard() {
   const handleImportSpreadsheetSample = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/admin/places/import-spreadsheet`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fieldMapping: {
-            nameEn: "Venue_Name_EN",
-            nameAr: "Venue_Name_AR",
-            cityId: "City",
-            categoryId: "Category",
-            neighborhoodEn: "District_EN",
-            neighborhoodAr: "District_AR",
-            priceRange: "Price_Tier",
-            kidsFriendly: "Kids_Friendly",
-            parking: "Parking",
-          },
-          rows: [
-            {
-              Venue_Name_EN: "Saadiyat Beach Club Lounge",
-              Venue_Name_AR: "لاونج نادي شاطئ السعديات",
-              City: "abudhabi",
-              Category: "cat-restaurants",
-              District_EN: "Saadiyat Island",
-              District_AR: "جزيرة السعديات",
-              Price_Tier: "UPSCALE",
-              Kids_Friendly: "AVAILABLE",
-              Parking: "AVAILABLE",
+      const res = await adminFetch(
+        `${API_BASE}/admin/places/import-spreadsheet`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fieldMapping: {
+              nameEn: "Venue_Name_EN",
+              nameAr: "Venue_Name_AR",
+              cityId: "City",
+              categoryId: "Category",
+              neighborhoodEn: "District_EN",
+              neighborhoodAr: "District_AR",
+              priceRange: "Price_Tier",
+              kidsFriendly: "Kids_Friendly",
+              parking: "Parking",
             },
-            {
-              Venue_Name_EN: "Diriyah Specialty Roasters",
-              Venue_Name_AR: "محمصة الدرعية المختصة",
-              City: "riyadh",
-              Category: "cat-cafes",
-              District_EN: "Hittin",
-              District_AR: "حطين",
-              Price_Tier: "MODERATE",
-              Kids_Friendly: "AVAILABLE",
-              Parking: "AVAILABLE",
-            },
-          ],
-        }),
-      }).then((r) => r.json());
+            rows: [
+              {
+                Venue_Name_EN: "Saadiyat Beach Club Lounge",
+                Venue_Name_AR: "لاونج نادي شاطئ السعديات",
+                City: "abudhabi",
+                Category: "cat-restaurants",
+                District_EN: "Saadiyat Island",
+                District_AR: "جزيرة السعديات",
+                Price_Tier: "UPSCALE",
+                Kids_Friendly: "AVAILABLE",
+                Parking: "AVAILABLE",
+              },
+              {
+                Venue_Name_EN: "Diriyah Specialty Roasters",
+                Venue_Name_AR: "محمصة الدرعية المختصة",
+                City: "riyadh",
+                Category: "cat-cafes",
+                District_EN: "Hittin",
+                District_AR: "حطين",
+                Price_Tier: "MODERATE",
+                Kids_Friendly: "AVAILABLE",
+                Parking: "AVAILABLE",
+              },
+            ],
+          }),
+        },
+      ).then((r) => r.json());
       setActionBanner(
         isAr
           ? `تم استيراد ${res.importedCount} أماكن من جدول البيانات مع ربط الحقول تلقائياً.`
@@ -353,7 +416,7 @@ export default function WherioAdminDashboard() {
   };
 
   const handleSchedulePlaceRecheck = async (placeId: string) => {
-    const res = await fetch(
+    const res = await adminFetch(
       `${API_BASE}/admin/places/${placeId}/schedule-recheck`,
       {
         method: "POST",
@@ -578,7 +641,7 @@ export default function WherioAdminDashboard() {
             </button>
 
             <button
-              onClick={loadAdminData}
+              onClick={() => loadAdminData()}
               className="inline-flex items-center gap-1.5 rounded-xl bg-[#0072DC] px-3.5 py-2 text-xs font-bold text-white hover:bg-[#072549]"
             >
               <RefreshCw
@@ -590,6 +653,54 @@ export default function WherioAdminDashboard() {
         </header>
 
         <main className="p-8 space-y-6">
+          {adminAuthError && (
+            <div className="rounded-2xl border-2 border-amber-400 bg-amber-50 p-5 text-[#072549] shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h3 className="text-sm font-extrabold text-amber-900">
+                    {isAr
+                      ? "مطلوب مفتاح وصول المشرف (ADMIN_API_KEY)"
+                      : "Admin Access Key Required (401 Unauthorized)"}
+                  </h3>
+                  <p className="mt-1 text-xs text-amber-800">
+                    {adminAuthError}
+                  </p>
+                  <p className="mt-1 text-[11px] text-amber-700">
+                    {isAr
+                      ? "أدخل قيمة ADMIN_API_KEY المطابقة للخادم الخلفي أو أضفها في إعدادات متغيرات البيئة في Vercel."
+                      : "Enter the ADMIN_API_KEY configured on your backend (or set ADMIN_API_KEY in Vercel Environment Variables)."}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="password"
+                    value={adminKeyInput}
+                    onChange={(e) => setAdminKeyInput(e.target.value)}
+                    placeholder={
+                      isAr ? "أدخل ADMIN_API_KEY..." : "Enter ADMIN_API_KEY..."
+                    }
+                    className="w-64 rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-bold text-slate-800 outline-none focus:border-[#0072DC]"
+                  />
+                  <button
+                    onClick={() => {
+                      const trimmed = adminKeyInput.trim();
+                      if (typeof window !== "undefined") {
+                        window.localStorage.setItem(
+                          "wherio_admin_key",
+                          trimmed,
+                        );
+                      }
+                      loadAdminData(trimmed);
+                    }}
+                    className="rounded-xl bg-[#072549] px-4 py-2 text-xs font-extrabold text-white hover:bg-[#0072DC]"
+                  >
+                    {isAr ? "فتح اللوحة" : "Unlock Dashboard"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {actionBanner && (
             <div className="flex items-center justify-between rounded-2xl border border-[#00B89C] bg-[#00B89C]/10 px-4 py-3 text-xs font-extrabold text-[#072549]">
               <span>{actionBanner}</span>
@@ -605,7 +716,7 @@ export default function WherioAdminDashboard() {
           {/* =========================================================
               TAB 1: LAUNCH READINESS & EXECUTIVE KPIS
           ========================================================= */}
-          {activeTab === "overview" && overview && (
+          {activeTab === "overview" && overview?.kpis && (
             <div className="space-y-6">
               {/* 100-Place Launch Readiness Progress Banner */}
               <div className="rounded-2xl bg-gradient-to-r from-[#072549] via-[#0A2E5C] to-[#0072DC] p-6 text-white shadow-md">
