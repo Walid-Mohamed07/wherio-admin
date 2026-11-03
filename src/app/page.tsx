@@ -21,10 +21,21 @@ import {
   Ban,
 } from "lucide-react";
 
-const API_BASE =
-  process.env.API_BASE_URL ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  "http://localhost:4000/api/v1";
+function resolveApiBaseUrl(): string {
+  const raw = (
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    process.env.API_BASE_URL ||
+    "http://localhost:4000/api/v1"
+  )
+    .trim()
+    .replace(/\/+$/, "");
+  if (raw.endsWith("/api/v1")) {
+    return raw;
+  }
+  return `${raw}/api/v1`;
+}
+
+const API_BASE = resolveApiBaseUrl();
 
 type AdminTab =
   | "overview"
@@ -113,6 +124,24 @@ export default function WherioAdminDashboard() {
         isAr
           ? `تم استكمال دليل الإطلاق بنجاح! تمت إضافة ${res.addedCount} مكاناً ليصبح الإجمالي ${res.totalPlaces} مكاناً (٥٠ أبوظبي + ٥٠ الرياض).`
           : `Phase 1 Launch Batch Complete! Added ${res.addedCount} structured places (Total directory: ${res.totalPlaces} places across Abu Dhabi & Riyadh).`,
+      );
+      await loadAdminData();
+    } catch (err) {
+      console.error(err);
+      setLoading(false);
+    }
+  };
+
+  const handleClearDemoData = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/admin/places/clear-demo-data`, {
+        method: "POST",
+      }).then((r) => r.json());
+      setActionBanner(
+        isAr
+          ? `تم مسح البيانات التجريبية بنجاح (${res.removedPlaces} مكاناً). قاعدة البيانات الآن نظيفة وجاهزة للإنتاج.`
+          : `Cleared ${res.removedPlaces} demo places & ${res.removedReviews} reviews. Database is now clean for Production.`,
       );
       await loadAdminData();
     } catch (err) {
@@ -503,8 +532,8 @@ export default function WherioAdminDashboard() {
             </div>
             <p className="text-xs text-slate-500">
               {isAr
-                ? "متصل مباشرة بقاعدة بيانات ويريو (Port 4000) • يدير جودة البيانات، التقييمات، وتفعيل المدن"
-                : "Connected to Wherio API (Port 4000) • Managing Abu Dhabi & Riyadh Launch Readiness"}
+                ? `متصل بـ API: ${API_BASE} • قاعدة البيانات: ${overview?.environment?.supabaseHost || "Local Store"}`
+                : `Connected API: ${API_BASE} • DB Host: ${overview?.environment?.supabaseHost || "Local Store"}`}
             </p>
           </div>
 
@@ -775,6 +804,15 @@ export default function WherioAdminDashboard() {
                       {isAr
                         ? "توليد الـ 100 مكان للإطلاق"
                         : "Populate 100 Launch Places"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleClearDemoData}
+                      className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-xs font-extrabold text-rose-700 hover:bg-rose-600 hover:text-white"
+                    >
+                      {isAr
+                        ? "مسح البيانات التجريبية (تصفير للإنتاج)"
+                        : "Clear Demo Data (Clean Production)"}
                     </button>
                   </div>
                 </div>
