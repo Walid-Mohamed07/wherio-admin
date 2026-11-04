@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   ShieldCheck,
@@ -19,23 +20,25 @@ import {
   History,
   HardDriveDownload,
   Ban,
+  Menu,
+  X,
+  ChevronDown,
+  LogOut,
+  UserPlus,
+  UserCheck,
+  KeyRound,
 } from "lucide-react";
+import {
+  ADMIN_API_BASE,
+  AdminUserProfile,
+  clearAdminSession,
+  getStoredAdminKey,
+  getStoredAdminToken,
+  getStoredAdminUser,
+  saveAdminSession,
+} from "@/lib/admin-auth";
 
-function resolveApiBaseUrl(): string {
-  const raw = (
-    process.env.NEXT_PUBLIC_API_BASE_URL ||
-    process.env.API_BASE_URL ||
-    "http://localhost:4000/api/v1"
-  )
-    .trim()
-    .replace(/\/+$/, "");
-  if (raw.endsWith("/api/v1")) {
-    return raw;
-  }
-  return `${raw}/api/v1`;
-}
-
-const API_BASE = resolveApiBaseUrl();
+const API_BASE = ADMIN_API_BASE;
 
 type AdminTab =
   | "overview"
@@ -46,10 +49,39 @@ type AdminTab =
   | "audit";
 
 export default function WherioAdminDashboard() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<AdminTab>("overview");
   const [cityFilter, setCityFilter] = useState<string>("ALL");
   const [lang, setLang] = useState<"en" | "ar">("en");
   const isAr = lang === "ar";
+
+  // Auth & Route Protection State
+  const [authChecking, setAuthChecking] = useState(true);
+  const [adminUser, setAdminUser] = useState<AdminUserProfile | null>(null);
+
+  // Responsive Sidebar Drawer & Header Avatar Menu State
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // Add New User Form State (Tab 5: Users & Roles)
+  const [showAddUserForm, setShowAddUserForm] = useState(false);
+  const [addingUser, setAddingUser] = useState(false);
+  const [newUserForm, setNewUserForm] = useState({
+    name: "",
+    email: "",
+    phone: "+97150",
+    countryCode: "AE" as "AE" | "SA" | "EG",
+    role: "CONTENT_EDITOR" as
+      | "SUPER_ADMIN"
+      | "CONTENT_EDITOR"
+      | "MODERATOR"
+      | "MERCHANT_ADMIN"
+      | "CUSTOMER",
+    password: "",
+    isPhoneVerified: true,
+    isEmailVerified: true,
+  });
 
   const [loading, setLoading] = useState(true);
   const [overview, setOverview] = useState<any | null>(null);
@@ -67,13 +99,8 @@ export default function WherioAdminDashboard() {
 
   const getActiveAdminKey = (overrideKey?: string): string => {
     if (overrideKey !== undefined) return overrideKey.trim();
-    if (typeof window !== "undefined") {
-      const saved = window.localStorage.getItem("wherio_admin_key");
-      if (saved && saved.trim()) return saved.trim();
-    }
     return (
-      process.env.NEXT_PUBLIC_ADMIN_API_KEY ||
-      process.env.ADMIN_API_KEY ||
+      getStoredAdminKey() ||
       adminKeyInput ||
       "dev-wherio-admin-key-2026"
     ).trim();
@@ -85,9 +112,11 @@ export default function WherioAdminDashboard() {
     overrideKey?: string,
   ) => {
     const key = getActiveAdminKey(overrideKey);
+    const token = getStoredAdminToken();
     const headers: Record<string, string> = {
       ...(options.headers as Record<string, string>),
       ...(key ? { "x-admin-key": key } : {}),
+      ...(token ? { "x-admin-token": token, Authorization: `Bearer ${token}` } : {}),
     };
     return fetch(url, { ...options, headers });
   };
@@ -160,12 +189,126 @@ export default function WherioAdminDashboard() {
   };
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const saved = window.localStorage.getItem("wherio_admin_key");
-      if (saved) setAdminKeyInput(saved);
-    }
-    loadAdminData();
+    const verifyAndLoad = async () => {
+      const token = getStoredAdminToken();
+      const cachedUser = getStoredAdminUser();
+      const savedKey = getStoredAdminKey();
+      if (savedKey) setAdminKeyInput(savedKey);
+
+      if (!token) {
+        clearAdminSession();
+        router.replace("/login");
+        return;
+      }
+
+      if (cachedUser) {
+        setAdminUser(cachedUser);
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/admin/auth/me`, {
+          headers: {
+            "x-admin-token": token,
+            Authorization: `Bearer ${token}`,
+          },
+        });
+        if (!res.ok) {
+          clearAdminSession();
+          router.replace("/login");
+          return;
+        }
+        const data = await res.json();
+        if (data?.user) {
+          setAdminUser(data.user);
+          saveAdminSession(token, data.user);
+        }
+        setAuthChecking(false);
+        await loadAdminData();
+      } catch {
+        // If offline or server unreachable but cachedUser exists, allow viewing cached shell
+        if (cachedUser) {
+          setAuthChecking(false);
+          await loadAdminData();
+        } else {
+          clearAdminSession();
+          router.replace("/login");
+        }
+      }
+    };
+
+    verifyAndLoad();
+  }, [router]);
+
+  // Collapse avatar menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        userMenuRef.current &&
+        !userMenuRef.current.contains(e.target as Node)
+      ) {
+        setIsUserMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  const handleLogout = async () => {
+    try {
+      await adminFetch(`${API_BASE}/admin/auth/logout`, { method: "POST" });
+    } catch {
+      // Ignore network error on logout
+    }
+    clearAdminSession();
+    router.replace("/login");
+  };
+
+  const handleCreateNewUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAddingUser(true);
+    try {
+      const res = await adminFetch(`${API_BASE}/admin/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...newUserForm,
+          actorName: adminUser?.name || "Wherio Super Admin",
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.user) {
+        setActionBanner(
+          (isAr ? data?.messageAr : data?.messageEn) ||
+            (isAr
+              ? "تعذر إنشاء المستخدم. تأكد من عدم تكرار البريد أو الهاتف."
+              : "Could not create user. Check that email and phone are unique."),
+        );
+        setAddingUser(false);
+        return;
+      }
+      setActionBanner(
+        isAr
+          ? `تمت إضافة المستخدم "${data.user.name}" (${data.user.role}) بنجاح.`
+          : `Added new user '${data.user.name}' (${data.user.role}) successfully.`,
+      );
+      setNewUserForm({
+        name: "",
+        email: "",
+        phone: "+97150",
+        countryCode: "AE",
+        role: "CONTENT_EDITOR",
+        password: "",
+        isPhoneVerified: true,
+        isEmailVerified: true,
+      });
+      setShowAddUserForm(false);
+      await loadAdminData();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAddingUser(false);
+    }
+  };
 
   const handleGenerate100LaunchPlaces = async () => {
     setLoading(true);
@@ -439,45 +582,92 @@ export default function WherioAdminDashboard() {
     cityFilter === "ALL" ? true : p.cityId === cityFilter,
   );
 
+  const adminInitials = (adminUser?.name || "Admin")
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+
+  if (authChecking || !adminUser) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center bg-[#072549] p-6 text-white">
+        <div className="flex items-center gap-3">
+          <RefreshCw className="h-6 w-6 animate-spin text-[#00D2B4]" />
+          <span className="text-sm font-extrabold tracking-wide">
+            Verifying Wherio Administrator Session...
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       dir={isAr ? "rtl" : "ltr"}
-      className="flex min-h-screen bg-slate-100 text-slate-900"
+      className="admin-shell bg-slate-100 text-slate-900"
     >
+      {/* Mobile / Tablet Backdrop when Sidebar Drawer is Open */}
+      {isSidebarOpen && (
+        <div
+          onClick={() => setIsSidebarOpen(false)}
+          className="fixed inset-0 z-40 bg-slate-950/60 backdrop-blur-xs lg:hidden"
+        />
+      )}
+
       {/* SIDEBAR NAVIGATION */}
-      <aside className="flex w-68 shrink-0 flex-col justify-between bg-[#072549] p-5 text-white shadow-xl">
+      <aside
+        className={`admin-sidebar flex flex-col justify-between bg-[#072549] p-5 text-white shadow-xl ${
+          isSidebarOpen ? "sidebar-open" : ""
+        }`}
+      >
         <div>
           {/* Wherio Brand Header */}
-          <div className="flex items-center gap-3 border-b border-white/10 pb-4">
-            <svg viewBox="0 0 80 80" fill="none" className="h-10 w-10 shrink-0">
-              <path
-                d="M40 7C29.5 7 21 15.5 21 26C21 36.2 40 53 40 53C40 53 59 36.2 59 26C59 15.5 50.5 7 40 7ZM40 32.5C36.1 32.5 33 29.4 33 25.5C33 21.6 36.1 18.5 40 18.5C43.9 18.5 47 21.6 47 25.5C47 29.4 43.9 32.5 40 32.5Z"
-                fill="#0088FF"
-              />
-              <path
-                d="M8 29C13 28 19 36 26 57L40 39L34 31L26 44C21 32 15 25 8 29Z"
-                fill="#00D2B4"
-              />
-              <path
-                d="M72 29C67 28 61 36 54 57L40 39L46 31L54 44C59 32 65 25 72 29Z"
-                fill="#FF991F"
-              />
-            </svg>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="text-lg font-extrabold tracking-tight text-white">
-                  Wherio
-                </span>
-                <span className="rounded-md bg-[#FF991F] px-1.5 py-0.5 text-[10px] font-extrabold text-[#072549]">
-                  ADMIN
-                </span>
+          <div className="flex items-center justify-between border-b border-white/10 pb-4">
+            <div className="flex items-center gap-3">
+              <svg
+                viewBox="0 0 80 80"
+                fill="none"
+                className="h-10 w-10 shrink-0"
+              >
+                <path
+                  d="M40 7C29.5 7 21 15.5 21 26C21 36.2 40 53 40 53C40 53 59 36.2 59 26C59 15.5 50.5 7 40 7ZM40 32.5C36.1 32.5 33 29.4 33 25.5C33 21.6 36.1 18.5 40 18.5C43.9 18.5 47 21.6 47 25.5C47 29.4 43.9 32.5 40 32.5Z"
+                  fill="#0088FF"
+                />
+                <path
+                  d="M8 29C13 28 19 36 26 57L40 39L34 31L26 44C21 32 15 25 8 29Z"
+                  fill="#00D2B4"
+                />
+                <path
+                  d="M72 29C67 28 61 36 54 57L40 39L46 31L54 44C59 32 65 25 72 29Z"
+                  fill="#FF991F"
+                />
+              </svg>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-lg font-extrabold tracking-tight text-white">
+                    Wherio
+                  </span>
+                  <span className="rounded-md bg-[#FF991F] px-1.5 py-0.5 text-[10px] font-extrabold text-[#072549]">
+                    ADMIN
+                  </span>
+                </div>
+                <p className="text-[11px] text-sky-200/80">
+                  {isAr
+                    ? "بوابة الحوكمة وجودة البيانات"
+                    : "Governance & Data Quality"}
+                </p>
               </div>
-              <p className="text-[11px] text-sky-200/80">
-                {isAr
-                  ? "بوابة الحوكمة وجودة البيانات"
-                  : "Governance & Data Quality"}
-              </p>
             </div>
+
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(false)}
+              className="rounded-lg p-1.5 text-sky-200 hover:bg-white/10 lg:hidden"
+              aria-label="Close navigation menu"
+            >
+              <X className="h-5 w-5" />
+            </button>
           </div>
 
           {/* Navigation Menu */}
@@ -524,7 +714,10 @@ export default function WherioAdminDashboard() {
               return (
                 <button
                   key={item.id}
-                  onClick={() => setActiveTab(item.id as AdminTab)}
+                  onClick={() => {
+                    setActiveTab(item.id as AdminTab);
+                    setIsSidebarOpen(false);
+                  }}
                   className={`flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-xs font-bold transition ${
                     active
                       ? "bg-[#0072DC] text-white shadow-sm"
@@ -567,42 +760,54 @@ export default function WherioAdminDashboard() {
       </aside>
 
       {/* MAIN CONTENT */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="admin-content-area overflow-y-auto">
         {/* Top Bar */}
-        <header className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white px-8 py-4 shadow-2xs">
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-lg font-extrabold text-[#072549]">
+        <header className="admin-header sticky top-0 z-30 border-b border-slate-200 bg-white shadow-2xs">
+          <div className="flex items-start gap-3">
+            {/* Hamburger Menu Button for <= 1024px */}
+            <button
+              type="button"
+              onClick={() => setIsSidebarOpen(true)}
+              className="mt-0.5 inline-flex items-center justify-center rounded-xl border border-slate-200 bg-slate-50 p-2 text-[#072549] hover:bg-slate-100 lg:hidden"
+              aria-label="Open navigation sidebar"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
+
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-base font-extrabold text-[#072549] sm:text-lg">
+                  {isAr
+                    ? "لوحة تحكم وحوكمة منصة ويريو (Wherio Phase 1 MVP — أبوظبي والرياض)"
+                    : "Wherio Phase 1 Governance & Content Operations Portal"}
+                </h1>
+                {overview?.environment && (
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-0.5 text-[10px] font-extrabold uppercase ${
+                      overview.environment.isProduction
+                        ? "bg-rose-600 text-white"
+                        : "bg-emerald-100 text-emerald-800"
+                    }`}
+                  >
+                    <Database className="h-3 w-3" />
+                    {overview.environment.appEnv} •{" "}
+                    {overview.environment.supabaseEnabled
+                      ? "Supabase DB"
+                      : "Local Store"}
+                  </span>
+                )}
+              </div>
+              <p className="mt-0.5 text-[11px] text-slate-500 sm:text-xs">
                 {isAr
-                  ? "لوحة تحكم وحوكمة منصة ويريو (Wherio Phase 1 MVP — أبوظبي والرياض)"
-                  : "Wherio Phase 1 Governance & Content Operations Portal"}
-              </h1>
-              {overview?.environment && (
-                <span
-                  className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-0.5 text-[10px] font-extrabold uppercase ${
-                    overview.environment.isProduction
-                      ? "bg-rose-600 text-white"
-                      : "bg-emerald-100 text-emerald-800"
-                  }`}
-                >
-                  <Database className="h-3 w-3" />
-                  {overview.environment.appEnv} •{" "}
-                  {overview.environment.supabaseEnabled
-                    ? "Supabase DB"
-                    : "Local Store"}
-                </span>
-              )}
+                  ? `متصل بـ API: ${API_BASE} • قاعدة البيانات: ${overview?.environment?.supabaseHost || "Local Store"}`
+                  : `Connected API: ${API_BASE} • DB Host: ${overview?.environment?.supabaseHost || "Local Store"}`}
+              </p>
             </div>
-            <p className="text-xs text-slate-500">
-              {isAr
-                ? `متصل بـ API: ${API_BASE} • قاعدة البيانات: ${overview?.environment?.supabaseHost || "Local Store"}`
-                : `Connected API: ${API_BASE} • DB Host: ${overview?.environment?.supabaseHost || "Local Store"}`}
-            </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="admin-header-actions">
             {/* City Filter */}
-            <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1 text-xs font-bold">
+            <div className="admin-city-pills flex items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1 text-xs font-bold">
               {[
                 { id: "ALL", label: isAr ? "الكل" : "All Cities" },
                 { id: "abudhabi", label: isAr ? "أبوظبي" : "Abu Dhabi" },
@@ -637,7 +842,10 @@ export default function WherioAdminDashboard() {
               className="inline-flex items-center gap-1.5 rounded-xl border border-[#0072DC] bg-[#0072DC]/10 px-3 py-2 text-xs font-extrabold text-[#0072DC] hover:bg-[#0072DC] hover:text-white"
             >
               <HardDriveDownload className="h-3.5 w-3.5" />
-              {isAr ? "تصدير تقرير العمليات (CSV)" : "Export Report (CSV)"}
+              <span className="hidden sm:inline">
+                {isAr ? "تصدير تقرير العمليات (CSV)" : "Export Report (CSV)"}
+              </span>
+              <span className="sm:hidden">CSV</span>
             </button>
 
             <button
@@ -647,12 +855,155 @@ export default function WherioAdminDashboard() {
               <RefreshCw
                 className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`}
               />
-              {isAr ? "تحديث" : "Refresh"}
+              <span className="hidden sm:inline">
+                {isAr ? "تحديث" : "Refresh"}
+              </span>
             </button>
+
+            {/* ADMIN USER AVATAR WITH COLLAPSIBLE / UNCOLLAPSIBLE OPTIONS MENU */}
+            <div ref={userMenuRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setIsUserMenuOpen((prev) => !prev)}
+                className="flex items-center gap-2.5 rounded-2xl border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-left transition hover:border-[#0072DC] hover:bg-white"
+              >
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#072549] to-[#0072DC] text-xs font-extrabold text-white shadow-xs">
+                  {adminInitials}
+                </div>
+                <div className="hidden md:block">
+                  <p className="max-w-[130px] truncate text-xs font-extrabold text-[#072549]">
+                    {adminUser.name}
+                  </p>
+                  <p className="text-[10px] font-bold text-[#00B89C]">
+                    {adminUser.role}
+                  </p>
+                </div>
+                <ChevronDown
+                  className={`h-4 w-4 text-slate-500 transition-transform duration-200 ${
+                    isUserMenuOpen ? "rotate-180 text-[#0072DC]" : ""
+                  }`}
+                />
+              </button>
+
+              {isUserMenuOpen && (
+                <div
+                  className={`absolute z-50 mt-2 w-72 rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl ${
+                    isAr ? "left-0" : "right-0"
+                  }`}
+                >
+                  {/* Signed-In Admin Info Card */}
+                  <div className="rounded-xl bg-slate-50 p-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#072549] text-sm font-extrabold text-white">
+                        {adminInitials}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-xs font-extrabold text-[#072549]">
+                          {adminUser.name}
+                        </p>
+                        <p className="truncate text-[11px] text-slate-500">
+                          {adminUser.email}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="mt-2.5 flex items-center justify-between border-t border-slate-200/80 pt-2 text-[10px]">
+                      <span className="rounded-md bg-[#072549] px-2 py-0.5 font-extrabold text-white">
+                        {adminUser.role}
+                      </span>
+                      <span className="inline-flex items-center gap-1 font-bold text-emerald-700">
+                        <UserCheck className="h-3 w-3" />
+                        {isAr ? "مشرف موثق" : "Verified Admin"}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Collapsible Menu Options */}
+                  <div className="mt-1.5 space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTab("users");
+                        setIsUserMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-100 hover:text-[#072549]"
+                    >
+                      <Users className="h-4 w-4 text-[#0072DC]" />
+                      <span>
+                        {isAr
+                          ? "إدارة المستخدمين والصلاحيات"
+                          : "Users & Governance Roles"}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTab("users");
+                        setShowAddUserForm(true);
+                        setIsUserMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-100 hover:text-[#072549]"
+                    >
+                      <UserPlus className="h-4 w-4 text-[#00B89C]" />
+                      <span>
+                        {isAr ? "إضافة مستخدم جديد +" : "Add New User +"}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTab("audit");
+                        setIsUserMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-100 hover:text-[#072549]"
+                    >
+                      <History className="h-4 w-4 text-amber-600" />
+                      <span>
+                        {isAr
+                          ? "سجل العمليات والنسخ الاحتياطي"
+                          : "Audit Logs & DB Backups"}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLang(isAr ? "en" : "ar");
+                        setIsUserMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-100 hover:text-[#072549]"
+                    >
+                      <Globe className="h-4 w-4 text-[#0072DC]" />
+                      <span>
+                        {isAr
+                          ? "التبديل إلى الإنجليزية (English)"
+                          : "Switch Language (العربية)"}
+                      </span>
+                    </button>
+                  </div>
+
+                  <div className="my-1.5 border-t border-slate-100" />
+
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-xs font-extrabold text-rose-600 transition hover:bg-rose-50"
+                  >
+                    <LogOut className="h-4 w-4" />
+                    <span>
+                      {isAr
+                        ? "تسجيل الخروج من اللوحة"
+                        : "Sign Out of Admin Portal"}
+                    </span>
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </header>
 
-        <main className="p-8 space-y-6">
+        <main className="admin-main space-y-6">
           {adminAuthError && (
             <div className="rounded-2xl border-2 border-amber-400 bg-amber-50 p-5 text-[#072549] shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-4">
@@ -1383,85 +1734,338 @@ export default function WherioAdminDashboard() {
               TAB 5: USERS, ROLES & DUAL VERIFICATION
           ========================================================= */}
           {activeTab === "users" && (
-            <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-2xs">
-              <h3 className="text-sm font-extrabold text-[#072549]">
-                {isAr
-                  ? "المستخدمون، حالة التوثيق المزدوج (هاتف OTP + بريد فريد)، والأدوار الإدارية:"
-                  : "Users, Dual Verification Status (Phone OTP + Unique Email) & Governance Roles:"}
-              </h3>
-              <div className="mt-4 overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-slate-400">
-                      <th className="pb-2">Name</th>
-                      <th className="pb-2">Phone (Unique)</th>
-                      <th className="pb-2">Email (Unique)</th>
-                      <th className="pb-2">Role</th>
-                      <th className="pb-2">Dual Verification</th>
-                      <th className="pb-2">Account Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {users.map((u: any) => (
-                      <tr key={u.id}>
-                        <td className="py-3 font-extrabold text-[#072549]">
-                          {u.name}
-                        </td>
-                        <td className="py-3 font-mono text-slate-600">
-                          {u.phone}
-                        </td>
-                        <td className="py-3 text-slate-600">{u.email}</td>
-                        <td className="py-3">
-                          <span className="rounded-lg bg-[#072549] px-2.5 py-0.5 text-[10px] font-extrabold text-white">
-                            {u.role}
-                          </span>
-                        </td>
-                        <td className="py-3">
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`rounded px-2 py-0.5 text-[10px] font-bold ${
-                                u.isPhoneVerified
-                                  ? "bg-emerald-100 text-emerald-800"
-                                  : "bg-rose-100 text-rose-700"
-                              }`}
-                            >
-                              Phone OTP: {u.isPhoneVerified ? "YES" : "NO"}
-                            </span>
-                            <span
-                              className={`rounded px-2 py-0.5 text-[10px] font-bold ${
-                                u.isEmailVerified
-                                  ? "bg-emerald-100 text-emerald-800"
-                                  : "bg-amber-100 text-amber-800"
-                              }`}
-                            >
-                              Email: {u.isEmailVerified ? "YES" : "PENDING"}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="py-3">
-                          <button
-                            onClick={() =>
-                              handleToggleUserSuspension(
-                                u.id,
-                                Boolean(u.isSuspended),
-                              )
+            <div className="space-y-5">
+              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-2xs">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-[#072549]">
+                      {isAr
+                        ? "المستخدمون، حالة التوثيق المزدوج (هاتف OTP + بريد فريد)، والأدوار الإدارية:"
+                        : "Users, Dual Verification Status (Phone OTP + Unique Email) & Governance Roles:"}
+                    </h3>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {isAr
+                        ? "يمكنك إضافة مستخدم جديد أو مشرف جديد وتحديد دوره الإداري وحالة التوثيق المزدوج."
+                        : "Manage registered users, governance roles, dual verification status, or add a new user/admin account."}
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowAddUserForm((prev) => !prev)}
+                    className="inline-flex items-center gap-2 rounded-xl bg-[#00B89C] px-4 py-2.5 text-xs font-extrabold text-white shadow-sm transition hover:bg-[#072549]"
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    <span>
+                      {showAddUserForm
+                        ? isAr
+                          ? "إغلاق النموذج"
+                          : "Close Form"
+                        : isAr
+                          ? "+ إضافة مستخدم جديد"
+                          : "+ Add New User"}
+                    </span>
+                  </button>
+                </div>
+
+                {/* Collapsible Add New User Form */}
+                {showAddUserForm && (
+                  <form
+                    onSubmit={handleCreateNewUser}
+                    className="mt-5 rounded-2xl border border-[#0072DC]/30 bg-slate-50 p-5"
+                  >
+                    <div className="mb-4 flex items-center justify-between border-b border-slate-200 pb-3">
+                      <h4 className="flex items-center gap-2 text-xs font-extrabold text-[#072549]">
+                        <UserPlus className="h-4 w-4 text-[#0072DC]" />
+                        {isAr
+                          ? "إضافة مستخدم أو مشرف جديد إلى النظام"
+                          : "Add New User / Governance Staff Member"}
+                      </h4>
+                      <span className="text-[11px] font-semibold text-slate-500">
+                        {isAr
+                          ? "ملاحظة: تحديد كلمة مرور يسمح للمشرف بتسجيل الدخول عبر /login"
+                          : "Tip: Setting a password allows staff roles to sign in at /login"}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+                      <div>
+                        <label className="mb-1 block text-[11px] font-extrabold text-slate-700">
+                          {isAr ? "الاسم الكامل *" : "Full Name *"}
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={newUserForm.name}
+                          onChange={(e) =>
+                            setNewUserForm({
+                              ...newUserForm,
+                              name: e.target.value,
+                            })
+                          }
+                          placeholder={
+                            isAr ? "مثال: خالد العتيبي" : "e.g. Khalid Al-Otaibi"
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 outline-none focus:border-[#0072DC]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-[11px] font-extrabold text-slate-700">
+                          {isAr
+                            ? "البريد الإلكتروني (فريد) *"
+                            : "Email Address (Unique) *"}
+                        </label>
+                        <input
+                          type="email"
+                          required
+                          value={newUserForm.email}
+                          onChange={(e) =>
+                            setNewUserForm({
+                              ...newUserForm,
+                              email: e.target.value,
+                            })
+                          }
+                          placeholder="user@wherio.com"
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 outline-none focus:border-[#0072DC]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-[11px] font-extrabold text-slate-700">
+                          {isAr
+                            ? "رقم الهاتف (فريد) *"
+                            : "Phone Number (Unique) *"}
+                        </label>
+                        <input
+                          type="tel"
+                          required
+                          value={newUserForm.phone}
+                          onChange={(e) =>
+                            setNewUserForm({
+                              ...newUserForm,
+                              phone: e.target.value,
+                            })
+                          }
+                          placeholder="+971501234567"
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 outline-none focus:border-[#0072DC]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-[11px] font-extrabold text-slate-700">
+                          {isAr ? "الدولة" : "Country"}
+                        </label>
+                        <select
+                          value={newUserForm.countryCode}
+                          onChange={(e) =>
+                            setNewUserForm({
+                              ...newUserForm,
+                              countryCode: e.target.value as
+                                | "AE"
+                                | "SA"
+                                | "EG",
+                            })
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-900 outline-none focus:border-[#0072DC]"
+                        >
+                          <option value="AE">🇦🇪 UAE (AE)</option>
+                          <option value="SA">🇸🇦 Saudi Arabia (SA)</option>
+                          <option value="EG">🇪🇬 Egypt (EG)</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-[11px] font-extrabold text-slate-700">
+                          {isAr ? "الدور والصلاحية *" : "Role *"}
+                        </label>
+                        <select
+                          value={newUserForm.role}
+                          onChange={(e) =>
+                            setNewUserForm({
+                              ...newUserForm,
+                              role: e.target.value as any,
+                            })
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-900 outline-none focus:border-[#0072DC]"
+                        >
+                          <option value="SUPER_ADMIN">SUPER_ADMIN</option>
+                          <option value="CONTENT_EDITOR">CONTENT_EDITOR</option>
+                          <option value="MODERATOR">MODERATOR</option>
+                          <option value="MERCHANT_ADMIN">MERCHANT_ADMIN</option>
+                          <option value="CUSTOMER">CUSTOMER</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-[11px] font-extrabold text-slate-700">
+                          {isAr
+                            ? "كلمة المرور (للمشرفين)"
+                            : "Password (for Admin Login)"}
+                        </label>
+                        <input
+                          type="password"
+                          value={newUserForm.password}
+                          onChange={(e) =>
+                            setNewUserForm({
+                              ...newUserForm,
+                              password: e.target.value,
+                            })
+                          }
+                          placeholder={
+                            isAr
+                              ? "6 أحرف على الأقل (اختياري للعملاء)"
+                              : "Min 6 chars (optional for customer)"
+                          }
+                          className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-900 outline-none focus:border-[#0072DC]"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-slate-200 pt-3">
+                      <div className="flex flex-wrap items-center gap-4 text-xs font-bold text-slate-700">
+                        <label className="inline-flex cursor-pointer items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={newUserForm.isPhoneVerified}
+                            onChange={(e) =>
+                              setNewUserForm({
+                                ...newUserForm,
+                                isPhoneVerified: e.target.checked,
+                              })
                             }
-                            className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-extrabold ${
-                              u.isSuspended
-                                ? "bg-rose-600 text-white"
-                                : "bg-slate-100 text-slate-700 hover:bg-rose-50 hover:text-rose-700"
-                            }`}
-                          >
-                            <Ban className="h-3 w-3" />
-                            {u.isSuspended
-                              ? "Suspended (Restore)"
-                              : "Active (Suspend)"}
-                          </button>
-                        </td>
+                            className="h-4 w-4 rounded accent-[#00B89C]"
+                          />
+                          <span>
+                            {isAr
+                              ? "الهاتف موثق (Phone OTP Verified)"
+                              : "Phone OTP Verified"}
+                          </span>
+                        </label>
+
+                        <label className="inline-flex cursor-pointer items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={newUserForm.isEmailVerified}
+                            onChange={(e) =>
+                              setNewUserForm({
+                                ...newUserForm,
+                                isEmailVerified: e.target.checked,
+                              })
+                            }
+                            className="h-4 w-4 rounded accent-[#00B89C]"
+                          />
+                          <span>
+                            {isAr
+                              ? "البريد موثق (Email Verified)"
+                              : "Email Verified"}
+                          </span>
+                        </label>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowAddUserForm(false)}
+                          className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100"
+                        >
+                          {isAr ? "إلغاء" : "Cancel"}
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={addingUser}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-[#072549] px-4 py-2 text-xs font-extrabold text-white hover:bg-[#0072DC] disabled:opacity-60"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>
+                            {addingUser
+                              ? isAr
+                                ? "جاري الحفظ..."
+                                : "Saving..."
+                              : isAr
+                                ? "حفظ المستخدم الجديد"
+                                : "Create User"}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  </form>
+                )}
+
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full min-w-[680px] text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-200 text-slate-400">
+                        <th className="pb-2">Name</th>
+                        <th className="pb-2">Phone (Unique)</th>
+                        <th className="pb-2">Email (Unique)</th>
+                        <th className="pb-2">Role</th>
+                        <th className="pb-2">Dual Verification</th>
+                        <th className="pb-2">Account Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {users.map((u: any) => (
+                        <tr key={u.id}>
+                          <td className="py-3 font-extrabold text-[#072549]">
+                            {u.name}
+                          </td>
+                          <td className="py-3 font-mono text-slate-600">
+                            {u.phone}
+                          </td>
+                          <td className="py-3 text-slate-600">{u.email}</td>
+                          <td className="py-3">
+                            <span className="rounded-lg bg-[#072549] px-2.5 py-0.5 text-[10px] font-extrabold text-white">
+                              {u.role}
+                            </span>
+                          </td>
+                          <td className="py-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span
+                                className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                                  u.isPhoneVerified
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : "bg-rose-100 text-rose-700"
+                                }`}
+                              >
+                                Phone OTP: {u.isPhoneVerified ? "YES" : "NO"}
+                              </span>
+                              <span
+                                className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                                  u.isEmailVerified
+                                    ? "bg-emerald-100 text-emerald-800"
+                                    : "bg-amber-100 text-amber-800"
+                                }`}
+                              >
+                                Email: {u.isEmailVerified ? "YES" : "PENDING"}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3">
+                            <button
+                              onClick={() =>
+                                handleToggleUserSuspension(
+                                  u.id,
+                                  Boolean(u.isSuspended),
+                                )
+                              }
+                              className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-extrabold ${
+                                u.isSuspended
+                                  ? "bg-rose-600 text-white"
+                                  : "bg-slate-100 text-slate-700 hover:bg-rose-50 hover:text-rose-700"
+                              }`}
+                            >
+                              <Ban className="h-3 w-3" />
+                              {u.isSuspended
+                                ? "Suspended (Restore)"
+                                : "Active (Suspend)"}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
