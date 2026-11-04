@@ -6,8 +6,128 @@ body {
   background-color: #f8fafc;
   color: #0f172a;
   font-family: var(--font-jakarta), var(--font-cairo), system-ui, sans-serif;
+  overflow-x: hidden;
 }
 
 [dir='rtl'] {
   font-family: var(--font-cairo), var(--font-jakarta), system-ui, sans-serif;
+}
+
+/* ==========================================================================
+   Wherio Admin Dashboard Responsive Layout & Media Queries
+   ========================================================================== */
+
+.admin-shell {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+}
+
+.admin-sidebar {
+  width: 17rem;
+  flex-shrink: 0;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.admin-content-area {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 2rem;
+}
+
+.admin-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+}
+
+.admin-main {
+  padding: 2rem;
+}
+
+/* Tablet & Mobile Drawer Breakpoint (<= 1024px) */
+@media screen and (max-width: 1024px) {
+  .admin-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    width: 17.5rem;
+    max-width: 85vw;
+    transform: translateX(-105%);
+  }
+
+  [dir='rtl'] .admin-sidebar {
+    left: auto;
+    right: 0;
+    transform: translateX(105%);
+  }
+
+  .admin-sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+
+  .admin-header {
+    padding: 0.875rem 1.25rem;
+    flex-wrap: wrap;
+  }
+
+  .admin-main {
+    padding: 1.25rem;
+  }
+}
+
+/* Small Tablet & Large Phone Breakpoint (<= 768px) */
+@media screen and (max-width: 768px) {
+  .admin-header {
+    padding: 0.75rem 1rem;
+    gap: 0.75rem;
+  }
+
+  .admin-header-actions {
+    width: 100%;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+
+  .admin-city-pills {
+    width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
+    padding-bottom: 0.25rem;
+  }
+
+  .admin-main {
+    padding: 1rem 0.75rem;
+  }
+
+  .admin-kpi-grid {
+    grid-template-columns: repeat(1, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Compact Phone Breakpoint (<= 480px) */
+@media screen and (max-width: 480px) {
+  .admin-header {
+    padding: 0.625rem 0.75rem;
+  }
+
+  .admin-main {
+    padding: 0.75rem 0.5rem;
+  }
+
+  .admin-auth-page {
+    padding: 0.75rem !important;
+  }
 }
