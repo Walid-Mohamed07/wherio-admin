@@ -2,11 +2,14 @@
 
 import React, { useState } from "react";
 import {
+  Bike,
   Camera,
   Car,
   Check,
+  CheckCircle2,
   Clock,
   Layers,
+  Lock,
   Package,
   Plus,
   RefreshCw,
@@ -670,15 +673,21 @@ export function SmartOperationsPanels({
 
                       <div className="mt-2 min-h-[34px] text-[11px]">
                         {isAvail && (
-                          <span className="font-extrabold text-emerald-700">
-                            ✓ {isAr ? "متاح للحجز الفوري" : "Ready for Reservation"}
+                          <span className="inline-flex items-center gap-1 font-extrabold text-emerald-700">
+                            <CheckCircle2 className="h-3.5 w-3.5" />
+                            <span>
+                              {isAr ? "متاح للحجز الفوري" : "Ready for Reservation"}
+                            </span>
                           </span>
                         )}
                         {isRes && (
                           <div className="text-amber-900">
-                            <p className="font-extrabold">
-                              🔒 {slot.reservedByUserName || "Reserved"} (
-                              {slot.reservedVehiclePlate})
+                            <p className="inline-flex items-center gap-1 font-extrabold">
+                              <Lock className="h-3.5 w-3.5 text-amber-700" />
+                              <span>
+                                {slot.reservedByUserName || "Reserved"} (
+                                {slot.reservedVehiclePlate})
+                              </span>
                             </p>
                             <p className="text-[10px] text-amber-700">
                               Grace lock until{" "}
@@ -688,8 +697,11 @@ export function SmartOperationsPanels({
                         )}
                         {isOcc && (
                           <div className="text-rose-900">
-                            <p className="font-extrabold">
-                              🚗 Plate: {slot.detectedPlateNumber || "OCCUPIED"}
+                            <p className="inline-flex items-center gap-1 font-extrabold">
+                              <Car className="h-3.5 w-3.5 text-rose-700" />
+                              <span>
+                                Plate: {slot.detectedPlateNumber || "OCCUPIED"}
+                              </span>
                             </p>
                             {slot.confidenceScore && (
                               <p className="text-[10px] text-rose-700">
@@ -801,11 +813,13 @@ export function SmartOperationsPanels({
         <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-xs">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-extrabold text-[#00D2B4]">
-                🏍️{" "}
-                {isAr
-                  ? "صندوق الدراجة النارية (Motorcycle Box)"
-                  : "Motorcycle Delivery Top-Box"}
+              <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#00D2B4]">
+                <Bike className="h-4 w-4" />
+                <span>
+                  {isAr
+                    ? "صندوق الدراجة النارية (Motorcycle Box)"
+                    : "Motorcycle Delivery Top-Box"}
+                </span>
               </span>
               <span className="rounded bg-white/15 px-2.5 py-0.5 font-mono text-[11px] font-bold">
                 {motoSpec.innerDimensionsCm.length} ×{" "}
@@ -823,11 +837,13 @@ export function SmartOperationsPanels({
 
           <div className="rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-xs">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-extrabold text-[#FF991F]">
-                🚗{" "}
-                {isAr
-                  ? "صندوق السيارة الخلفي (Sedan Car Trunk)"
-                  : "Delivery Sedan Car Trunk"}
+              <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-[#FF991F]">
+                <Car className="h-4 w-4" />
+                <span>
+                  {isAr
+                    ? "صندوق السيارة الخلفي (Sedan Car Trunk)"
+                    : "Delivery Sedan Car Trunk"}
+                </span>
               </span>
               <span className="rounded bg-white/15 px-2.5 py-0.5 font-mono text-[11px] font-bold">
                 {carSpec.innerDimensionsCm.length} ×{" "}
@@ -871,15 +887,23 @@ export function SmartOperationsPanels({
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
                       <span
-                        className={`rounded-lg px-2.5 py-1 text-xs font-extrabold text-white ${
+                        className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-extrabold text-white ${
                           batch.vehicleType === "MOTORCYCLE"
                             ? "bg-[#0072DC]"
                             : "bg-[#072549]"
                         }`}
                       >
-                        {batch.vehicleType === "MOTORCYCLE"
-                          ? "🏍️ 1 MOTORCYCLE"
-                          : "🚗 1 SEDAN CAR TRUNK"}
+                        {batch.vehicleType === "MOTORCYCLE" ? (
+                          <>
+                            <Bike className="h-3.5 w-3.5" />
+                            <span>1 MOTORCYCLE</span>
+                          </>
+                        ) : (
+                          <>
+                            <Car className="h-3.5 w-3.5" />
+                            <span>1 SEDAN CAR TRUNK</span>
+                          </>
+                        )}
                       </span>
                       <span className="font-mono text-xs font-extrabold text-[#072549]">
                         {batch.rideBatchId}

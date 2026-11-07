@@ -1529,7 +1529,30 @@ export default function WherioAdminDashboard() {
                             </p>
                           </td>
                           <td className="py-3 font-semibold text-[#0072DC]">
-                            {p.categoryId}
+                            <div>{p.categoryId}</div>
+                            {p.categoryId === "cat-parking" && (() => {
+                              const cfg = parkingConfigs.find(
+                                (c: any) => c.placeId === p.id,
+                              );
+                              return cfg ? (
+                                <div className="mt-1 flex flex-wrap items-center gap-1">
+                                  <span
+                                    className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-extrabold text-white ${
+                                      cfg.managementMode === "CAMERA_AI"
+                                        ? "bg-emerald-600"
+                                        : "bg-amber-600"
+                                    }`}
+                                  >
+                                    <Camera className="h-2.5 w-2.5" />
+                                    {cfg.managementMode}
+                                  </span>
+                                  <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-700">
+                                    {cfg.availableSlotsCount}/{cfg.totalSlots}{" "}
+                                    Free
+                                  </span>
+                                </div>
+                              ) : null;
+                            })()}
                           </td>
                           <td className="py-3 text-[11px]">
                             <div>
@@ -1576,7 +1599,18 @@ export default function WherioAdminDashboard() {
                             )}
                           </td>
                           <td className="py-3">
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {p.categoryId === "cat-parking" && (
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveTab("parking")}
+                                  className="inline-flex items-center gap-1 rounded-lg bg-emerald-50 px-2 py-1 text-[10px] font-extrabold text-emerald-700 hover:bg-emerald-100"
+                                  title="Configure Camera AI vs Manual Slot Mode"
+                                >
+                                  <Camera className="h-3 w-3" />
+                                  {isAr ? "إعدادات المواقف" : "Slots & Camera"}
+                                </button>
+                              )}
                               {p.dataQuality?.status !== "PUBLISHED" ? (
                                 <button
                                   onClick={() =>
