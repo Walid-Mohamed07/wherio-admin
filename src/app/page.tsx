@@ -27,6 +27,8 @@ import {
   UserPlus,
   UserCheck,
   KeyRound,
+  Camera,
+  Truck,
 } from "lucide-react";
 import {
   ADMIN_API_BASE,
@@ -37,6 +39,7 @@ import {
   getStoredAdminUser,
   saveAdminSession,
 } from "@/lib/admin-auth";
+import { SmartOperationsPanels } from "@/components/SmartOperationsPanels";
 
 const API_BASE = ADMIN_API_BASE;
 
@@ -46,7 +49,9 @@ type AdminTab =
   | "cities"
   | "reviews"
   | "users"
-  | "audit";
+  | "audit"
+  | "parking"
+  | "delivery";
 
 export default function WherioAdminDashboard() {
   const router = useRouter();
@@ -89,6 +94,12 @@ export default function WherioAdminDashboard() {
   const [reviews, setReviews] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [parkingConfigs, setParkingConfigs] = useState<any[]>([]);
+  const [parkingReservations, setParkingReservations] = useState<any[]>([]);
+  const [catalogProducts, setCatalogProducts] = useState<any[]>([]);
+  const [ecommerceOrders, setEcommerceOrders] = useState<any[]>([]);
+  const [deliveryBatches, setDeliveryBatches] = useState<any[]>([]);
+  const [vehicleSpecs, setVehicleSpecs] = useState<any | null>(null);
   const [actionBanner, setActionBanner] = useState<string | null>(null);
   const [adminKeyInput, setAdminKeyInput] = useState<string>(
     process.env.NEXT_PUBLIC_ADMIN_API_KEY ||
@@ -151,12 +162,28 @@ export default function WherioAdminDashboard() {
     setLoading(true);
     setAdminAuthError(null);
     try {
-      const [ovHttp, plHttp, rvHttp, usHttp, auHttp] = await Promise.all([
+      const [
+        ovHttp,
+        plHttp,
+        rvHttp,
+        usHttp,
+        auHttp,
+        pkHttp,
+        pkResHttp,
+        catHttp,
+        ordHttp,
+        batHttp,
+      ] = await Promise.all([
         adminFetch(`${API_BASE}/admin/overview`, {}, overrideKey),
         adminFetch(`${API_BASE}/admin/places`, {}, overrideKey),
         adminFetch(`${API_BASE}/admin/reviews`, {}, overrideKey),
         adminFetch(`${API_BASE}/admin/users`, {}, overrideKey),
         adminFetch(`${API_BASE}/admin/audit-logs`, {}, overrideKey),
+        adminFetch(`${API_BASE}/parking/places`, {}, overrideKey),
+        adminFetch(`${API_BASE}/parking/reservations`, {}, overrideKey),
+        adminFetch(`${API_BASE}/commerce/catalog`, {}, overrideKey),
+        adminFetch(`${API_BASE}/commerce/orders`, {}, overrideKey),
+        adminFetch(`${API_BASE}/commerce/delivery/batches`, {}, overrideKey),
       ]);
 
       const ovRes = await ovHttp.json();
@@ -169,11 +196,26 @@ export default function WherioAdminDashboard() {
         return;
       }
 
-      const [plRes, rvRes, usRes, auRes] = await Promise.all([
+      const [
+        plRes,
+        rvRes,
+        usRes,
+        auRes,
+        pkRes,
+        pkReservationsRes,
+        catRes,
+        ordRes,
+        batRes,
+      ] = await Promise.all([
         plHttp.json(),
         rvHttp.json(),
         usHttp.json(),
         auHttp.json(),
+        pkHttp.json().catch(() => []),
+        pkResHttp.json().catch(() => []),
+        catHttp.json().catch(() => []),
+        ordHttp.json().catch(() => []),
+        batHttp.json().catch(() => ({})),
       ]);
 
       setOverview(ovRes);
@@ -181,6 +223,16 @@ export default function WherioAdminDashboard() {
       setReviews(Array.isArray(rvRes) ? rvRes : []);
       setUsers(Array.isArray(usRes) ? usRes : []);
       setAuditLogs(Array.isArray(auRes) ? auRes : []);
+      setParkingConfigs(Array.isArray(pkRes) ? pkRes : []);
+      setParkingReservations(
+        Array.isArray(pkReservationsRes) ? pkReservationsRes : [],
+      );
+      setCatalogProducts(Array.isArray(catRes) ? catRes : []);
+      setEcommerceOrders(Array.isArray(ordRes) ? ordRes : []);
+      setDeliveryBatches(
+        Array.isArray(batRes?.batches) ? batRes.batches : [],
+      );
+      if (batRes?.vehicleSpecs) setVehicleSpecs(batRes.vehicleSpecs);
     } catch (err) {
       console.error("Failed to fetch Wherio Admin API:", err);
     } finally {
@@ -708,6 +760,18 @@ export default function WherioAdminDashboard() {
                 labelEn: "6. Audit Log & Backups",
                 labelAr: "٦. سجل العمليات والنسخ الاحتياطي",
                 icon: <History className="h-4 w-4" />,
+              },
+              {
+                id: "parking",
+                labelEn: "7. Smart Parking & Camera AI",
+                labelAr: "٧. المواقف الذكية وكاميرا AI",
+                icon: <Camera className="h-4 w-4" />,
+              },
+              {
+                id: "delivery",
+                labelEn: "8. E-Commerce & 3D Delivery",
+                labelAr: "٨. المتجر وتحسين التوصيل 3D",
+                icon: <Truck className="h-4 w-4" />,
               },
             ].map((item) => {
               const active = activeTab === item.id;
@@ -2134,6 +2198,24 @@ export default function WherioAdminDashboard() {
                 </div>
               </div>
             </div>
+          )}
+
+          {(activeTab === "parking" || activeTab === "delivery") && (
+            <SmartOperationsPanels
+              activeTab={activeTab}
+              isAr={isAr}
+              cityFilter={cityFilter}
+              apiBase={API_BASE}
+              adminFetch={(url, opts) => adminFetch(url, opts)}
+              parkingConfigs={parkingConfigs}
+              parkingReservations={parkingReservations}
+              catalogProducts={catalogProducts}
+              ecommerceOrders={ecommerceOrders}
+              deliveryBatches={deliveryBatches}
+              vehicleSpecs={vehicleSpecs}
+              onRefresh={() => loadAdminData()}
+              setActionBanner={setActionBanner}
+            />
           )}
         </main>
       </div>
