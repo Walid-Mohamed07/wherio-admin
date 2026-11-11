@@ -45,7 +45,7 @@ export function saveAdminSession(
   if (adminKey && adminKey.trim()) {
     window.localStorage.setItem(ADMIN_KEY_STORAGE, adminKey.trim());
   }
-  const maxAge = 60 * 60 * 24 * 7; // 7 days
+  const maxAge = 60 * 60 * 24 * 30; // 30 days
   document.cookie = `${ADMIN_TOKEN_COOKIE}=${encodeURIComponent(token)}; path=/; max-age=${maxAge}; SameSite=Lax`;
 }
 
